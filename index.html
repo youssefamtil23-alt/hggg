@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blocky Boost League</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 20px; color: #f5f4e8; background: radial-gradient(ellipse at top, #263c4a, #10191f 70%); }
+    main { width: min(100%, 1000px); }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 0 12px; }
+    h1 { margin: 0; font-size: clamp(1.25rem, 3vw, 2rem); letter-spacing: .04em; }
+    .scoreboard { display: flex; gap: 12px; align-items: center; padding: 8px 14px; border: 2px solid #536a72; background: #18262ddd; font-weight: 800; font-variant-numeric: tabular-nums; }
+    .blue { color: #62c8ff; } .orange { color: #ffb34e; }
+    .frame { position: relative; border: 4px solid #7d9991; box-shadow: 0 12px 40px #0008; background: #315d36; }
+    canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; }
+    .help { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 20px; padding: 12px 2px; color: #c6d5d3; font-size: .9rem; }
+    kbd { padding: 2px 6px; border: 1px solid #6c8285; border-radius: 4px; background: #263a40; color: white; font: inherit; }
+    #toast { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; font-size: clamp(2rem, 8vw, 5rem); font-weight: 1000; letter-spacing: .08em; color: white; text-shadow: 4px 5px #172a30, 0 0 20px #000; opacity: 0; transition: opacity .2s; }
+    #toast.show { opacity: 1; }
+    @media (max-width: 560px) { body { padding: 10px; } header { align-items: flex-start; flex-direction: column; } .help { font-size: .8rem; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>⛏️ BLOCKY BOOST LEAGUE 🚗</h1>
+      <div class="scoreboard"><span class="blue">BLUE</span><span id="blueScore">0</span><span>—</span><span id="orangeScore">0</span><span class="orange">ORANGE</span></div>
+    </header>
+    <div class="frame">
+      <canvas id="game" width="960" height="600" aria-label="Top-down blocky car soccer game"></canvas>
+      <div id="toast">GOAL!</div>
+    </div>
+    <div class="help">
+      <span>Drive: <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows · Boost: <kbd>Space</kbd></span>
+      <span>Reset match: <kbd>R</kbd> · Blue car scores on the orange goal →</span>
+    </div>
+  </main>
+<script>
+(() => {
+  const canvas = document.querySelector('#game');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const keys = new Set();
+  const blueScoreEl = document.querySelector('#blueScore');
+  const orangeScoreEl = document.querySelector('#orangeScore');
+  const toast = document.querySelector('#toast');
+  const goalTop = 218, goalBottom = 382;
+  const car = { x: 250, y: H / 2, angle: 0, speed: 0, boost: 100, color: '#41b9ed', team: 'blue' };
+  const ball = { x: W / 2, y: H / 2, vx: 0, vy: 0, r: 19 };
+  let blueScore = 0, orangeScore = 0, toastTimer = 0, last = performance.now();
+  const rand = (a, b) => a + Math.random() * (b - a);
+
+  function resetPositions() {
+    car.x = 250; car.y = H / 2; car.angle = 0; car.speed = 0;
+    ball.x = W / 2; ball.y = H / 2; ball.vx = 0; ball.vy = 0;
+  }
+  function resetMatch() { blueScore = orangeScore = 0; updateScore(); resetPositions(); }
+  function updateScore() { blueScoreEl.textContent = blueScore; orangeScoreEl.textContent = orangeScore; }
+  function score(team) {
+    if (team === 'blue') blueScore++; else orangeScore++;
+    updateScore(); resetPositions(); toast.textContent = team === 'blue' ? 'BLUE SCORES!' : 'ORANGE SCORES!';
+    toast.classList.add('show'); toastTimer = 1.4;
+  }
+
+  addEventListener('keydown', e => {
+    const k = e.key.toLowerCase();
+    if (['arrowup','arrowdown','arrowleft','arrowright',' '].includes(k)) e.preventDefault();
+    keys.add(k);
+    if (k === 'r') resetMatch();
+  });
+  addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
+  addEventListener('blur', () => keys.clear());
+
+  function update(dt) {
+    const forward = keys.has('w') || keys.has('arrowup');
+    const reverse = keys.has('s') || keys.has('arrowdown');
+    const left = keys.has('a') || keys.has('arrowleft');
+    const right = keys.has('d') || keys.has('arrowright');
+    const boosting = keys.has(' ') && car.boost > 0 && forward;
+    const grip = Math.min(1, Math.abs(car.speed) / 100);
+    if (left) car.angle -= (2.7 + grip * 1.5) * dt * (car.speed < -5 ? -1 : 1);
+    if (right) car.angle += (2.7 + grip * 1.5) * dt * (car.speed < -5 ? -1 : 1);
+    if (forward) car.speed += (boosting ? 690 : 370) * dt;
+    if (reverse) car.speed -= 330 * dt;
+    const maxSpeed = boosting ? 460 : 330;
+    car.speed = Math.max(-155, Math.min(maxSpeed, car.speed));
+    if (!forward && !reverse) car.speed *= Math.pow(.982, dt * 60);
+    if (boosting) car.boost = Math.max(0, car.boost - 32 * dt);
+    else car.boost = Math.min(100, car.boost + 8 * dt);
+    car.x += Math.cos(car.angle) * car.speed * dt;
+    car.y += Math.sin(car.angle) * car.speed * dt;
+    car.x = Math.max(42, Math.min(W - 42, car.x));
+    car.y = Math.max(42, Math.min(H - 42, car.y));
+
+    // A small knockback kick gives the car a satisfying arcade feel on contact.
+    const dx = ball.x - car.x, dy = ball.y - car.y;
+    const dist = Math.hypot(dx, dy), minDist = ball.r + 25;
+    if (dist < minDist) {
+      const nx = dx / (dist || 1), ny = dy / (dist || 1);
+      ball.x = car.x + nx * minDist; ball.y = car.y + ny * minDist;
+      const hit = Math.max(150, Math.abs(car.speed) * 1.25);
+      ball.vx += nx * hit + Math.cos(car.angle) * 95;
+      ball.vy += ny * hit + Math.sin(car.angle) * 95;
+    }
+    ball.x += ball.vx * dt; ball.y += ball.vy * dt;
+    ball.vx *= Math.pow(.992, dt * 60); ball.vy *= Math.pow(.992, dt * 60);
+    if (ball.y - ball.r < 32) { ball.y = 32 + ball.r; ball.vy = Math.abs(ball.vy) * .78; }
+    if (ball.y + ball.r > H - 32) { ball.y = H - 32 - ball.r; ball.vy = -Math.abs(ball.vy) * .78; }
+    if (ball.x - ball.r < 32) {
+      if (ball.y > goalTop && ball.y < goalBottom) score('orange');
+      else { ball.x = 32 + ball.r; ball.vx = Math.abs(ball.vx) * .78; }
+    }
+    if (ball.x + ball.r > W - 32) {
+      if (ball.y > goalTop && ball.y < goalBottom) score('blue');
+      else { ball.x = W - 32 - ball.r; ball.vx = -Math.abs(ball.vx) * .78; }
+    }
+    if (toastTimer > 0 && (toastTimer -= dt) <= 0) toast.classList.remove('show');
+  }
+
+  function rect(x,y,w,h,color) { ctx.fillStyle = color; ctx.fillRect(x,y,w,h); }
+  function drawField() {
+    rect(0,0,W,H,'#356d3c');
+    const tile = 48;
+    for (let y=0; y<H; y+=tile) for (let x=0; x<W; x+=tile) {
+      if ((x/tile + y/tile) % 2 === 0) rect(x,y,tile,tile,'#3b7841');
+      // tiny blocky grass flecks
+      if ((x*7 + y*13) % 11 === 0) rect(x+12,y+15,5,4,'#4a8548');
+    }
+    // Stone boundary and center markings
+    rect(16,16,W-32,H-32,'#b3b7a0'); rect(30,30,W-60,H-60,'#315f38');
+    ctx.strokeStyle='#c2d0a6'; ctx.lineWidth=4; ctx.setLineDash([12,10]);
+    ctx.beginPath(); ctx.moveTo(W/2,34); ctx.lineTo(W/2,H-34); ctx.stroke(); ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(W/2,H/2,78,0,Math.PI*2); ctx.stroke();
+    rect(W/2-5,H/2-5,10,10,'#d7dfb3');
+    // Goal mouths, with checkerboard netting
+    for (const x of [0,W-32]) {
+      rect(x,goalTop,32,goalBottom-goalTop,'#253d40');
+      for (let y=goalTop; y<goalBottom; y+=16) for (let xx=x; xx<x+32; xx+=16)
+        if (((y-goalTop)/16 + (xx-x)/16)%2===0) rect(xx,y,16,16,'#3f6560');
+    }
+    rect(28,goalTop-8,8,goalBottom-goalTop+16,'#c9d0b1'); rect(W-36,goalTop-8,8,goalBottom-goalTop+16,'#c9d0b1');
+    // boost pads
+    for (const [x,y] of [[150,100],[150,500],[480,90],[480,510],[810,100],[810,500]]) {
+      rect(x-12,y-12,24,24,'#927b35'); rect(x-7,y-7,14,14,'#ffd34d'); rect(x-3,y-3,6,6,'#fff2a1');
+    }
+  }
+  function drawCar() {
+    ctx.save(); ctx.translate(car.x,car.y); ctx.rotate(car.angle);
+    // shadow, chunky wheels, body and windshield
+    rect(-24,-19,52,42,'#172a27');
+    rect(-18,-24,14,8,'#20272a'); rect(10,-24,14,8,'#20272a');
+    rect(-18,16,14,8,'#20272a'); rect(10,16,14,8,'#20272a');
+    rect(-26,-15,50,30,car.color); rect(10,-11,15,22,'#d8edf0');
+    rect(-7,-10,14,20,'#25566c'); rect(-24,-10,6,7,'#fff3ac'); rect(-24,3,6,7,'#fff3ac');
+    if (keys.has(' ') && car.boost > 0 && (keys.has('w') || keys.has('arrowup'))) {
+      rect(-38,-8,12,6,'#ffb438'); rect(-45,-4,9,5,'#ff6c30');
+    }
+    ctx.restore();
+    // boost meter
+    rect(car.x-24,car.y+34,48,5,'#172a27'); rect(car.x-23,car.y+35,46*car.boost/100,3,'#ffd34d');
+  }
+  function drawBall() {
+    ctx.save(); ctx.translate(ball.x,ball.y);
+    rect(-ball.r+4,-ball.r+6,ball.r*2,ball.r*2,'#20352f');
+    rect(-ball.r,-ball.r,ball.r*2,ball.r*2,'#eee9d6');
+    rect(-8,-15,15,8,'#46545a'); rect(7,-5,9,10,'#46545a');
+    rect(-13,5,11,10,'#46545a'); rect(-2,-2,8,9,'#667579');
+    rect(-12,-12,7,5,'#fff');
+    ctx.restore();
+  }
+  function draw() {
+    drawField(); drawCar(); drawBall();
+    // simple HUD hint
+    rect(42,44,132,27,'#1c322ebd'); ctx.fillStyle='#e6eddb'; ctx.font='bold 13px system-ui'; ctx.fillText('BOOST',52,62);
+  }
+  function frame(now) {
+    const dt = Math.min(.033, (now-last)/1000); last=now;
+    update(dt); draw(); requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
